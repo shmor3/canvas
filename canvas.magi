@@ -1,0 +1,221 @@
+// canvas — terminal display and rendering for MAGI
+//
+// Provides terminal raw mode, ANSI escape code rendering,
+// cursor control, color output, and a character-cell framebuffer.
+//
+// Usage:
+//   use canvas::*;
+//   let screen = canvas_new(80, 24);
+//   canvas_set(screen, 10, 5, "#", "red");
+//   canvas_render(screen);
+
+// Terminal raw mode via termios FFI
+use std::fs::*;
+use std::io::*;
+
+// ANSI escape codes
+const ESC = "\x1b";
+const CSI = "\x1b[";
+
+// Colors
+const BLACK = "30";
+const RED = "31";
+const GREEN = "32";
+const YELLOW = "33";
+const BLUE = "34";
+const MAGENTA = "35";
+const CYAN = "36";
+const WHITE = "37";
+
+const BG_BLACK = "40";
+const BG_RED = "41";
+const BG_GREEN = "42";
+const BG_YELLOW = "43";
+const BG_BLUE = "44";
+const BG_MAGENTA = "45";
+const BG_CYAN = "46";
+const BG_WHITE = "47";
+
+const RESET = "\x1b[0m";
+const BOLD = "\x1b[1m";
+const DIM = "\x1b[2m";
+const UNDERLINE = "\x1b[4m";
+const BLINK = "\x1b[5m";
+const INVERSE = "\x1b[7m";
+
+// Create a new canvas (character-cell framebuffer)
+fn canvas_new(width, height) {
+    let mut cells = [];
+    for (let mut y = 0; y < height; y += 1) {
+        let mut row = [];
+        for (let mut x = 0; x < width; x += 1) {
+            row.push({"char": " ", "fg": "", "bg": ""});
+        }
+        cells.push(row);
+    }
+    {"width": width, "height": height, "cells": cells, "cursor_x": 0, "cursor_y": 0}
+}
+
+// Set a cell in the canvas
+fn canvas_set(canvas, x, y, ch, fg) {
+    if x >= 0 && x < canvas.width && y >= 0 && y < canvas.height {
+        canvas.cells[y][x] = {"char": ch, "fg": fg, "bg": ""};
+    }
+}
+
+// Set a cell with foreground and background color
+fn canvas_set_color(canvas, x, y, ch, fg, bg) {
+    if x >= 0 && x < canvas.width && y >= 0 && y < canvas.height {
+        canvas.cells[y][x] = {"char": ch, "fg": fg, "bg": bg};
+    }
+}
+
+// Clear the canvas
+fn canvas_clear(canvas) {
+    for (let mut y = 0; y < canvas.height; y += 1) {
+        for (let mut x = 0; x < canvas.width; x += 1) {
+            canvas.cells[y][x] = {"char": " ", "fg": "", "bg": ""};
+        }
+    }
+}
+
+// Write a string to the canvas at position
+fn canvas_write(canvas, x, y, text, fg) {
+    let chars = text.chars();
+    for (let mut i = 0; i < chars.len(); i += 1) {
+        canvas_set(canvas, x + i, y, chars[i], fg);
+    }
+}
+
+// Render the canvas to terminal
+fn canvas_render(canvas) {
+    let mut out = f"{CSI}H"; // cursor home
+    for (let mut y = 0; y < canvas.height; y += 1) {
+        for (let mut x = 0; x < canvas.width; x += 1) {
+            let cell = canvas.cells[y][x];
+            if cell.fg != "" {
+                let color_code = match cell.fg {
+                    "black" => BLACK,
+                    "red" => RED,
+                    "green" => GREEN,
+                    "yellow" => YELLOW,
+                    "blue" => BLUE,
+                    "magenta" => MAGENTA,
+                    "cyan" => CYAN,
+                    "white" => WHITE,
+                    _ => WHITE,
+                };
+                out = out + f"{CSI}{color_code}m{cell.char}{RESET}";
+            } else {
+                out = out + cell.char;
+            }
+        }
+        out = out + "\n";
+    }
+    output out;
+}
+
+// Clear the terminal screen
+fn screen_clear() {
+    output f"{CSI}2J{CSI}H";
+}
+
+// Move cursor to position
+fn cursor_move(x, y) {
+    output f"{CSI}{y + 1};{x + 1}H";
+}
+
+// Hide cursor
+fn cursor_hide() {
+    output f"{CSI}?25l";
+}
+
+// Show cursor
+fn cursor_show() {
+    output f"{CSI}?25h";
+}
+
+// Get terminal size (approximate)
+fn terminal_size() {
+    {"width": 80, "height": 24}
+}
+
+// Draw a rectangle
+fn canvas_rect(canvas, x, y, w, h, ch, fg) {
+    for (let mut dy = 0; dy < h; dy += 1) {
+        for (let mut dx = 0; dx < w; dx += 1) {
+            if dy == 0 || dy == h - 1 || dx == 0 || dx == w - 1 {
+                canvas_set(canvas, x + dx, y + dy, ch, fg);
+            }
+        }
+    }
+}
+
+// Draw a filled rectangle
+fn canvas_fill(canvas, x, y, w, h, ch, fg) {
+    for (let mut dy = 0; dy < h; dy += 1) {
+        for (let mut dx = 0; dx < w; dx += 1) {
+            canvas_set(canvas, x + dx, y + dy, ch, fg);
+        }
+    }
+}
+
+// Draw a line (horizontal or vertical)
+fn canvas_line(canvas, x1, y1, x2, y2, ch, fg) {
+    if y1 == y2 {
+        let start = if x1 < x2 { x1 } else { x2 };
+        let end = if x1 > x2 { x1 } else { x2 };
+        for (let mut x = start; x <= end; x += 1) {
+            canvas_set(canvas, x, y1, ch, fg);
+        }
+    } else if x1 == x2 {
+        let start = if y1 < y2 { y1 } else { y2 };
+        let end = if y1 > y2 { y1 } else { y2 };
+        for (let mut y = start; y <= end; y += 1) {
+            canvas_set(canvas, x1, y, ch, fg);
+        }
+    }
+}
+
+// Draw text centered on a line
+fn canvas_center(canvas, y, text, fg) {
+    let x = (canvas.width - text.len()) / 2;
+    canvas_write(canvas, x, y, text, fg);
+}
+
+// Color a string for direct output (no canvas needed)
+fn color(text, fg) {
+    let code = match fg {
+        "black" => BLACK,
+        "red" => RED,
+        "green" => GREEN,
+        "yellow" => YELLOW,
+        "blue" => BLUE,
+        "magenta" => MAGENTA,
+        "cyan" => CYAN,
+        "white" => WHITE,
+        _ => WHITE,
+    };
+    f"{CSI}{code}m{text}{RESET}"
+}
+
+// Bold text
+fn bold(text) {
+    f"{BOLD}{text}{RESET}"
+}
+
+// RGB color (256-color mode)
+fn rgb(text, r, g, b) {
+    let code = 16 + (r / 51) * 36 + (g / 51) * 6 + (b / 51);
+    f"{CSI}38;5;{code}m{text}{RESET}"
+}
+
+// True color (24-bit)
+fn truecolor(text, r, g, b) {
+    f"{CSI}38;2;{r};{g};{b}m{text}{RESET}"
+}
+
+// Background true color
+fn bg_truecolor(text, r, g, b) {
+    f"{CSI}48;2;{r};{g};{b}m{text}{RESET}"
+}

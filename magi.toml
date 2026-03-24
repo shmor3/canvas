@@ -1,0 +1,7 @@
+[package]
+name = "canvas"
+version = "0.1.0"
+description = "Terminal display, pixel rendering, colors, and cursor control"
+magi = ">=0.9.0"
+
+[dependencies]
