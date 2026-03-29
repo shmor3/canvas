@@ -5,3 +5,10 @@ description = "Terminal display, pixel rendering, colors, and cursor control"
 magi = ">=0.9.0"
 
 [dependencies]
+
+[native]
+sources = ["lib/magi_sdl2.c"]
+include = ["lib/include"]
+link-static = { linux-x86_64 = "lib/linux-x86_64/libSDL2.a", windows-x86_64 = "lib/windows-x86_64/libSDL2.a" }
+link-system = ["pthread", "dl", "m"]
+link-system-windows = ["mingw32", "dinput8", "dxguid", "dxerr8", "user32", "gdi32", "winmm", "imm32", "ole32", "oleaut32", "shell32", "setupapi", "version", "uuid"]
