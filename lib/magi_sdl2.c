@@ -4,6 +4,7 @@
 //
 // Build: cc program.o magi_rt.c magi_sdl2.c -Ilib/include lib/<platform>/libSDL2.a -lpthread -ldl -lm -o program
 
+#include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +30,8 @@ static int64_t mk_str(const char* s) { return (int64_t)(NANBOX_SIG | ((uint64_t)
 static int64_t as_int(int64_t v) { return (int64_t)((uint64_t)v & PAYLOAD_MASK); }
 static int64_t sext48(int64_t v) { return (v << 16) >> 16; }
 static int64_t get_int(int64_t v) { return sext48(as_int(v)); }
+// For pointer values — no sign extension (pointers are unsigned 48-bit)
+static uintptr_t get_ptr(int64_t v) { return (uintptr_t)((uint64_t)v & PAYLOAD_MASK); }
 static const char* get_str(int64_t v) { return (const char*)(uintptr_t)((uint64_t)v & PAYLOAD_MASK); }
 
 extern int64_t __magi_map_new(int32_t count, int64_t* entries);
@@ -44,36 +47,46 @@ int64_t canvas_sdl_dispatch(const char* name, int32_t argc, int64_t* args) {
 
     if (strcmp(name, "sdl_init") == 0) {
         SDL_SetMainReady();
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) return mk_null();
+        fprintf(stderr, "[SDL] Initializing...\n");
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) {
+            fprintf(stderr, "[SDL] Init failed: %s\n", SDL_GetError());
+            return mk_null();
+        }
+        fprintf(stderr, "[SDL] Init OK\n");
         const char* title = get_str(a);
         int w = (int)get_int(b);
         int h = argc > 2 ? (int)get_int(args[2]) : 600;
         SDL_Window* win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, SDL_WINDOW_SHOWN);
-        if (!win) return mk_null();
-        SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
-        if (!ren) { SDL_DestroyWindow(win); return mk_null(); }
+        if (!win) { fprintf(stderr, "[SDL] CreateWindow failed: %s\n", SDL_GetError()); return mk_null(); }
+        SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+        if (!ren) {
+            fprintf(stderr, "[SDL] Accelerated renderer failed, trying software...\n");
+            ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+        }
+        if (!ren) { fprintf(stderr, "[SDL] CreateRenderer failed: %s\n", SDL_GetError()); SDL_DestroyWindow(win); return mk_null(); }
+        fprintf(stderr, "[SDL] Window %dx%d created\n", w, h);
         SdlCtx* ctx = (SdlCtx*)malloc(sizeof(SdlCtx));
         ctx->win = win; ctx->ren = ren;
         return mk_int((int64_t)(uintptr_t)ctx);
     }
     if (strcmp(name, "sdl_set_color") == 0) {
-        SdlCtx* ctx = (SdlCtx*)(uintptr_t)get_int(a);
+        SdlCtx* ctx = (SdlCtx*)get_ptr(a);
         if (ctx) SDL_SetRenderDrawColor(ctx->ren, (int)get_int(b),
             argc>2?(int)get_int(args[2]):0, argc>3?(int)get_int(args[3]):0, 255);
         return mk_null();
     }
     if (strcmp(name, "sdl_clear") == 0) {
-        SdlCtx* ctx = (SdlCtx*)(uintptr_t)get_int(a);
+        SdlCtx* ctx = (SdlCtx*)get_ptr(a);
         if (ctx) SDL_RenderClear(ctx->ren);
         return mk_null();
     }
     if (strcmp(name, "sdl_present") == 0) {
-        SdlCtx* ctx = (SdlCtx*)(uintptr_t)get_int(a);
+        SdlCtx* ctx = (SdlCtx*)get_ptr(a);
         if (ctx) SDL_RenderPresent(ctx->ren);
         return mk_null();
     }
     if (strcmp(name, "sdl_fill_rect") == 0) {
-        SdlCtx* ctx = (SdlCtx*)(uintptr_t)get_int(a);
+        SdlCtx* ctx = (SdlCtx*)get_ptr(a);
         if (ctx) {
             SDL_Rect r = {(int)get_int(b), argc>2?(int)get_int(args[2]):0,
                           argc>3?(int)get_int(args[3]):1, argc>4?(int)get_int(args[4]):1};
@@ -82,18 +95,18 @@ int64_t canvas_sdl_dispatch(const char* name, int32_t argc, int64_t* args) {
         return mk_null();
     }
     if (strcmp(name, "sdl_draw_pixel") == 0) {
-        SdlCtx* ctx = (SdlCtx*)(uintptr_t)get_int(a);
+        SdlCtx* ctx = (SdlCtx*)get_ptr(a);
         if (ctx) SDL_RenderDrawPoint(ctx->ren, (int)get_int(b), argc>2?(int)get_int(args[2]):0);
         return mk_null();
     }
     if (strcmp(name, "sdl_draw_line") == 0) {
-        SdlCtx* ctx = (SdlCtx*)(uintptr_t)get_int(a);
+        SdlCtx* ctx = (SdlCtx*)get_ptr(a);
         if (ctx) SDL_RenderDrawLine(ctx->ren, (int)get_int(b),
             argc>2?(int)get_int(args[2]):0, argc>3?(int)get_int(args[3]):0, argc>4?(int)get_int(args[4]):0);
         return mk_null();
     }
     if (strcmp(name, "sdl_poll_event") == 0) {
-        SdlCtx* ctx = (SdlCtx*)(uintptr_t)get_int(a);
+        SdlCtx* ctx = (SdlCtx*)get_ptr(a);
         if (!ctx) return mk_null();
         SDL_Event ev;
         if (!SDL_PollEvent(&ev)) return mk_null();
@@ -112,7 +125,7 @@ int64_t canvas_sdl_dispatch(const char* name, int32_t argc, int64_t* args) {
         return mk_int((int64_t)SDL_GetTicks());
     }
     if (strcmp(name, "sdl_destroy") == 0) {
-        SdlCtx* ctx = (SdlCtx*)(uintptr_t)get_int(a);
+        SdlCtx* ctx = (SdlCtx*)get_ptr(a);
         if (ctx) { SDL_DestroyRenderer(ctx->ren); SDL_DestroyWindow(ctx->win); SDL_Quit(); free(ctx); }
         return mk_null();
     }
