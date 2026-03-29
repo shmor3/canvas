@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define SDL_MAIN_HANDLED
 #ifdef _WIN32
 #include "include/SDL.h"
 #else
@@ -42,6 +43,7 @@ int64_t canvas_sdl_dispatch(const char* name, int32_t argc, int64_t* args) {
     int64_t b = argc > 1 ? args[1] : mk_null();
 
     if (strcmp(name, "sdl_init") == 0) {
+        SDL_SetMainReady();
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) return mk_null();
         const char* title = get_str(a);
         int w = (int)get_int(b);
